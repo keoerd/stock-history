@@ -1,0 +1,14 @@
+name = "stockdoc"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Pages 빌드 설정
+[pages_build_config]
+build_command = "npm run build"
+build_output_dir = "dist"
+
+# KV 네임스페이스 바인딩
+# 이 부분이 가장 중요합니다!
+[[kv_namespaces]]
+binding = "STOCK_TICKERS"
+id = "여기에_Cloudflare_대시보드에서_확인한_KV_ID를_입력하세요"
