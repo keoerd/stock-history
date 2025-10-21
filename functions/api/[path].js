@@ -11,13 +11,13 @@ export async function onRequest(context) {
         if (path[0] === 'tickers') {
             // GET: 전체 티커 목록 불러오기
             if (request.method === 'GET') {
-                const tickers = await env.TICKER_KV.get("TICKER_MASTER_LIST") || "[]";
+                const tickers = await env.MY_KV.get("TICKER_MASTER_LIST") || "[]";
                 return new Response(tickers, { headers: { 'Content-Type': 'application/json' } });
             }
             // POST: 전체 티커 목록 저장하기
             if (request.method === 'POST') {
                 const body = await request.json();
-                await env.TICKER_KV.put("TICKER_MASTER_LIST", JSON.stringify(body));
+                await env.MY_KV.put("TICKER_MASTER_LIST", JSON.stringify(body));
                 return new Response(JSON.stringify({ success: true }));
             }
         }

@@ -1,7 +1,9 @@
+// src/worker.js
+
 /**
  * Cloudflare Cron Worker
- * * 이 워커는 wrangler.toml에 설정된 cron 스케줄에 따라 주기적으로 실행됩니다.
- * 1. TICKER_KV에서 추적할 전체 티커 목록을 가져옵니다.
+ * - wrangler.toml의 cron 스케줄에 따라 주기적으로 실행됩니다.
+ * 1. MY_KV에서 추적할 전체 티커 목록을 가져옵니다.
  * 2. 각 티커의 옵션 데이터를 Nasdaq에서 가져와 분석합니다.
  * 3. 분석 결과를 D1 데이터베이스의 'analysis_history' 테이블에 저장합니다.
  */
@@ -10,74 +12,72 @@
 // 메인 워커 로직
 // ==========================================================
 export default {
-  async scheduled(controller, env, ctx) {
-    console.log("Cron Trigger 실행: 분석 데이터 수집 시작");
+    async scheduled(controller, env, ctx) {
+        console.log("Cron Trigger 실행: 분석 데이터 수집 시작");
 
-    // 1. KV에서 추적할 티커 목록 전체를 가져옵니다.
-    const tickerListJson = await env.TICKER_KV.get("TICKER_MASTER_LIST");
-    if (!tickerListJson) {
-      console.log("추적할 티커 목록이 없습니다. 작업을 종료합니다.");
-      return;
-    }
-
-    const tickers = JSON.parse(tickerListJson);
-    if (!tickers || tickers.length === 0) {
-      console.log("추적할 티커가 목록에 없습니다.");
-      return;
-    }
-
-    console.log(`수집 대상 티커: ${tickers.join(', ')}`);
-
-    const analysisResults = [];
-
-    // 2. 각 티커에 대해 분석을 순차적으로 수행합니다.
-    for (const ticker of tickers) {
-      try {
-        const data = await getOptionsAndPriceData(ticker);
-        if (data && data.options.length > 0) {
-          const metrics = calculateLayer2Metrics(data.options, data.currentPrice);
-          const maxPainPrice = calculateMaxPain(data.options);
-          const analysis = generateAnalysis(ticker, data.currentPrice, metrics, maxPainPrice);
-
-          const result = {
-            ticker: ticker,
-            timestamp: Date.now(),
-            current_price: data.currentPrice,
-            // 분석 결과 전체를 JSON 문자열로 변환하여 저장
-            analysis_data: JSON.stringify({ ...data, metrics, analysis, maxPainPrice })
-          };
-          analysisResults.push(result);
-          console.log(`[${ticker}] 분석 완료.`);
-        } else {
-          console.log(`[${ticker}] 분석할 유효한 데이터가 없습니다.`);
+        // 1. KV에서 추적할 티커 목록 전체를 가져옵니다.
+        const tickerListJson = await env.MY_KV.get("TICKER_MASTER_LIST");
+        if (!tickerListJson) {
+            console.log("추적할 티커 목록이 없습니다. 작업을 종료합니다.");
+            return;
         }
-      } catch (error) {
-        console.error(`[${ticker}] 분석 중 오류 발생:`, error.message);
-      }
-    }
 
-    // 3. 분석 결과를 D1 데이터베이스에 일괄 저장합니다.
-    if (analysisResults.length > 0) {
-      try {
-        const stmt = env.DB.prepare(
-          "INSERT INTO analysis_history (ticker, timestamp, current_price, analysis_data) VALUES (?, ?, ?, ?)"
-        );
-        const batch = analysisResults.map(r => stmt.bind(r.ticker, r.timestamp, r.current_price, r.analysis_data));
-        await env.DB.batch(batch);
-        console.log(`${analysisResults.length}개의 분석 결과를 D1에 성공적으로 저장했습니다.`);
-      } catch (d1Error) {
-        console.error("D1 데이터베이스 저장 실패:", d1Error.message);
-      }
-    } else {
-        console.log("저장할 분석 결과가 없습니다.");
-    }
-  },
+        const tickers = JSON.parse(tickerListJson);
+        if (!tickers || tickers.length === 0) {
+            console.log("추적할 티커가 목록에 없습니다.");
+            return;
+        }
+
+        console.log(`수집 대상 티커: ${tickers.join(', ')}`);
+
+        const analysisResults = [];
+
+        // 2. 각 티커에 대해 분석을 순차적으로 수행합니다.
+        for (const ticker of tickers) {
+            try {
+                const data = await getOptionsAndPriceData(ticker);
+                if (data && data.options.length > 0) {
+                    const metrics = calculateLayer2Metrics(data.options, data.currentPrice);
+                    const maxPainPrice = calculateMaxPain(data.options);
+                    const analysis = generateAnalysis(ticker, data.currentPrice, metrics, maxPainPrice);
+
+                    const result = {
+                        ticker: ticker,
+                        timestamp: Date.now(),
+                        current_price: data.currentPrice,
+                        analysis_data: JSON.stringify({ ...data, metrics, analysis, maxPainPrice })
+                    };
+                    analysisResults.push(result);
+                    console.log(`[${ticker}] 분석 완료.`);
+                } else {
+                    console.log(`[${ticker}] 분석할 유효한 데이터가 없습니다.`);
+                }
+            } catch (error) {
+                console.error(`[${ticker}] 분석 중 오류 발생:`, error.message);
+            }
+        }
+
+        // 3. 분석 결과를 D1 데이터베이스에 일괄 저장합니다.
+        if (analysisResults.length > 0) {
+            try {
+                const stmt = env.DB.prepare(
+                    "INSERT INTO analysis_history (ticker, timestamp, current_price, analysis_data) VALUES (?, ?, ?, ?)"
+                );
+                const batch = analysisResults.map(r => stmt.bind(r.ticker, r.timestamp, r.current_price, r.analysis_data));
+                await env.DB.batch(batch);
+                console.log(`${analysisResults.length}개의 분석 결과를 D1에 성공적으로 저장했습니다.`);
+            } catch (d1Error) {
+                console.error("D1 데이터베이스 저장 실패:", d1Error.message);
+            }
+        } else {
+            console.log("저장할 분석 결과가 없습니다.");
+        }
+    },
 };
 
 
 // ==========================================================
 // 설정값 및 분석 로직
-// (Vue 컴포넌트에서 사용하던 로직을 그대로 가져옴)
 // ==========================================================
 
 const NASDAQ_API_HEADERS = { "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9", };
@@ -85,98 +85,97 @@ const MINIMUM_VOLUME_FOR_SIGNAL = 500;
 const MINIMUM_VOLUME_FOR_VOI = 100;
 
 async function getOptionsAndPriceData(ticker) {
-  try {
-    // Cloudflare Worker 환경에서는 프록시가 필요 없으므로 직접 API URL을 호출합니다.
-    const baseUrl = `https://api.nasdaq.com/api/quote/${ticker}/option-chain`;
-    const params = `?assetclass=stocks&limit=1000`; // 전체 옵션 체인을 가져오려면 '&money=all' 추가 가능
-    const url = baseUrl + params;
+    try {
+        const baseUrl = `https://api.nasdaq.com/api/quote/${ticker}/option-chain`;
+        const params = `?assetclass=stocks&limit=1000`;
+        const url = baseUrl + params;
 
-    const response = await fetch(url, { headers: NASDAQ_API_HEADERS });
-    if (!response.ok) {
-        throw new Error(`Nasdaq API fetching error: ${response.statusText}`);
+        const response = await fetch(url, { headers: NASDAQ_API_HEADERS });
+        if (!response.ok) {
+            throw new Error(`Nasdaq API fetching error: ${response.statusText}`);
+        }
+        const responseData = await response.json();
+
+        if (!responseData.data?.table?.rows || responseData.data.table.rows.length < 2) return null;
+
+        const lastTradeStr = responseData.data.lastTrade || "";
+        const currentPriceMatch = lastTradeStr.match(/\$(\d+(\.\d+)?)/);
+        const currentPrice = currentPriceMatch ? parseFloat(currentPriceMatch[1]) : 0;
+
+        let rows = responseData.data.table.rows;
+        let expirationDate = "N/A";
+        const options = [];
+
+        const headerRow = rows.find((row) => row.expirygroup && row.expirygroup !== "");
+        if (headerRow) expirationDate = headerRow.expirygroup;
+
+        const targetDate = rows.find((row) => row.strike)?.expiryDate;
+        if (targetDate) rows = rows.filter((item) => !item.strike || item.expiryDate === targetDate);
+
+        for (const row of rows) {
+            const strike = parseFloat(row.strike);
+            if (!isNaN(strike)) {
+                options.push({ type: "Call", strike, vol: parseInt(row.c_Volume) || 0, openInterest: parseInt(row.c_Openinterest) || 0, lastPrice: parseFloat(row.c_Last) || 0 });
+                options.push({ type: "Put", strike, vol: parseInt(row.p_Volume) || 0, openInterest: parseInt(row.p_Openinterest) || 0, lastPrice: parseFloat(row.p_Last) || 0 });
+            }
+        }
+        return { options, currentPrice, expirationDate };
+    } catch (error) {
+        console.error(`[${ticker}] getOptionsAndPriceData error:`, error);
+        throw error;
     }
-    const responseData = await response.json();
-
-    if (!responseData.data?.table?.rows || responseData.data.table.rows.length < 2) return null;
-
-    const lastTradeStr = responseData.data.lastTrade || "";
-    const currentPriceMatch = lastTradeStr.match(/\$(\d+(\.\d+)?)/);
-    const currentPrice = currentPriceMatch ? parseFloat(currentPriceMatch[1]) : 0;
-
-    let rows = responseData.data.table.rows;
-    let expirationDate = "N/A";
-    const options = [];
-
-    const headerRow = rows.find((row) => row.expirygroup && row.expirygroup !== "");
-    if (headerRow) expirationDate = headerRow.expirygroup;
-
-    const targetDate = rows.find((row) => row.strike)?.expiryDate;
-    if (targetDate) rows = rows.filter((item) => !item.strike || item.expiryDate === targetDate);
-
-    for (const row of rows) {
-      const strike = parseFloat(row.strike);
-      if (!isNaN(strike)) {
-        options.push({ type: "Call", strike, vol: parseInt(row.c_Volume) || 0, openInterest: parseInt(row.c_Openinterest) || 0, lastPrice: parseFloat(row.c_Last) || 0 });
-        options.push({ type: "Put", strike, vol: parseInt(row.p_Volume) || 0, openInterest: parseInt(row.p_Openinterest) || 0, lastPrice: parseFloat(row.p_Last) || 0 });
-      }
-    }
-    return { options, currentPrice, expirationDate };
-  } catch (error) {
-    console.error(`[${ticker}] getOptionsAndPriceData error:`, error);
-    throw error;
-  }
 }
 
 function calculateLayer2Metrics(options, currentPrice) {
-  const defaultOption = { vol: 0, openInterest: 0, strike: 'N/A', type: '-', lastPrice: 0, breakEvenPrice: 0, requiredMovePercent: 0, voiRatio: 0 };
-  let totalCallVolume = 0, totalPutVolume = 0;
-  let maxVolumeOption = { ...defaultOption, vol: -1 };
-  let maxOiOption = { ...defaultOption, openInterest: -1 };
-  let maxVoiOption = { ...defaultOption, voiRatio: -1 };
+    const defaultOption = { vol: 0, openInterest: 0, strike: 'N/A', type: '-', lastPrice: 0, breakEvenPrice: 0, requiredMovePercent: 0, voiRatio: 0 };
+    let totalCallVolume = 0, totalPutVolume = 0;
+    let maxVolumeOption = { ...defaultOption, vol: -1 };
+    let maxOiOption = { ...defaultOption, openInterest: -1 };
+    let maxVoiOption = { ...defaultOption, voiRatio: -1 };
 
-  const optionsWithVoi = options.map(opt => ({ ...opt, voiRatio: (opt.openInterest > 0) ? (opt.vol / opt.openInterest) : (opt.vol > 0 ? Infinity : 0) }));
+    const optionsWithVoi = options.map(opt => ({ ...opt, voiRatio: (opt.openInterest > 0) ? (opt.vol / opt.openInterest) : (opt.vol > 0 ? Infinity : 0) }));
 
-  for (const opt of optionsWithVoi) {
-    if (opt.type === "Call") totalCallVolume += opt.vol; else totalPutVolume += opt.vol;
-    if (opt.vol > maxVolumeOption.vol) maxVolumeOption = opt;
-    if (opt.openInterest > maxOiOption.openInterest) maxOiOption = opt;
-    if (opt.vol >= MINIMUM_VOLUME_FOR_VOI && opt.voiRatio > maxVoiOption.voiRatio) maxVoiOption = opt;
-  }
-
-  if (maxVolumeOption.vol === -1) maxVolumeOption = { ...defaultOption };
-  if (maxOiOption.openInterest === -1) maxOiOption = { ...defaultOption };
-  if (maxVoiOption.voiRatio === -1) maxVoiOption = { ...defaultOption };
-
-  const putCallRatio = totalCallVolume > 0 ? (totalPutVolume / totalCallVolume) : 0;
-
-  [maxVolumeOption, maxOiOption, maxVoiOption].forEach(opt => {
-    if (typeof opt.strike === 'number') {
-      opt.breakEvenPrice = opt.type === 'Call' ? opt.strike + opt.lastPrice : opt.strike - opt.lastPrice;
-      opt.requiredMovePercent = currentPrice > 0 ? ((opt.breakEvenPrice - currentPrice) / currentPrice) * 100 : 0;
+    for (const opt of optionsWithVoi) {
+        if (opt.type === "Call") totalCallVolume += opt.vol; else totalPutVolume += opt.vol;
+        if (opt.vol > maxVolumeOption.vol) maxVolumeOption = opt;
+        if (opt.openInterest > maxOiOption.openInterest) maxOiOption = opt;
+        if (opt.vol >= MINIMUM_VOLUME_FOR_VOI && opt.voiRatio > maxVoiOption.voiRatio) maxVoiOption = opt;
     }
-  });
 
-  return { maxVolumeOption, maxOiOption, putCallRatio, maxVoiOption };
+    if (maxVolumeOption.vol === -1) maxVolumeOption = { ...defaultOption };
+    if (maxOiOption.openInterest === -1) maxOiOption = { ...defaultOption };
+    if (maxVoiOption.voiRatio === -1) maxVoiOption = { ...defaultOption };
+
+    const putCallRatio = totalCallVolume > 0 ? (totalPutVolume / totalCallVolume) : 0;
+
+    [maxVolumeOption, maxOiOption, maxVoiOption].forEach(opt => {
+        if (typeof opt.strike === 'number') {
+            opt.breakEvenPrice = opt.type === 'Call' ? opt.strike + opt.lastPrice : opt.strike - opt.lastPrice;
+            opt.requiredMovePercent = currentPrice > 0 ? ((opt.breakEvenPrice - currentPrice) / currentPrice) * 100 : 0;
+        }
+    });
+
+    return { maxVolumeOption, maxOiOption, putCallRatio, maxVoiOption };
 }
 
 function calculateMaxPain(options) {
-  if (!options || options.length === 0) return 0;
-  const uniqueStrikes = [...new Set(options.map(o => o.strike))].sort((a, b) => a - b);
-  let minLoss = Infinity, maxPainPrice = 0;
-  for (const strikePrice of uniqueStrikes) {
-    let totalLoss = 0;
-    for (const option of options) {
-      if (option.openInterest > 0) {
-        if (option.type === 'Call' && option.strike < strikePrice) totalLoss += (strikePrice - option.strike) * option.openInterest;
-        else if (option.type === 'Put' && option.strike > strikePrice) totalLoss += (option.strike - strikePrice) * option.openInterest;
-      }
+    if (!options || options.length === 0) return 0;
+    const uniqueStrikes = [...new Set(options.map(o => o.strike))].sort((a, b) => a - b);
+    let minLoss = Infinity, maxPainPrice = 0;
+    for (const strikePrice of uniqueStrikes) {
+        let totalLoss = 0;
+        for (const option of options) {
+            if (option.openInterest > 0) {
+                if (option.type === 'Call' && option.strike < strikePrice) totalLoss += (strikePrice - option.strike) * option.openInterest;
+                else if (option.type === 'Put' && option.strike > strikePrice) totalLoss += (option.strike - strikePrice) * option.openInterest;
+            }
+        }
+        if (totalLoss < minLoss) {
+            minLoss = totalLoss;
+            maxPainPrice = strikePrice;
+        }
     }
-    if (totalLoss < minLoss) {
-      minLoss = totalLoss;
-      maxPainPrice = strikePrice;
-    }
-  }
-  return maxPainPrice;
+    return maxPainPrice;
 }
 
 function generateAnalysis(ticker, currentPrice, metrics, maxPainPrice) {
@@ -245,7 +244,7 @@ function generateAnalysis(ticker, currentPrice, metrics, maxPainPrice) {
     }
 
     let squeezeText = "특별한 스퀴즈 징후는 포착되지 않았습니다.";
-    if (putCallRatio < 0.6 && maxVoiOption.type === 'Call' && maxVoiOption.strike > currentPrice && maxVoiOption.vol > MINIMUM_VOLUME_FOR_SIGNAL) {
+    if (putCallRatio < 0.6 && maxVoiOption.type === 'Call' && typeof maxVoiOption.strike === 'number' && maxVoiOption.strike > currentPrice && maxVoiOption.vol > MINIMUM_VOLUME_FOR_SIGNAL) {
         squeezeText = `⚠️ 감마 스퀴즈 잠재력: 낮은 풋-콜 비율과 함께 외가격(OTM) 콜옵션에 대한 강력한 신규 베팅이 감지되었습니다. 주가가 행사가 $${maxVoiOption.strike}을 넘어설 경우, 급격한 주가 상승이 촉발될 수 있습니다.`;
     }
     squeezeText += " (참고: 공매도 비율이 20% 이상으로 높을 경우, 숏스퀴즈 가능성도 함께 고려해야 합니다.)";

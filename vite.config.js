@@ -24,7 +24,7 @@ export default defineConfig({
         // rewrite: (path) => path.replace(/^\/api\/quote/, ''),
       },
       '/api/kv': {
-        target: 'http://localhost:8788',
+        target: 'http://localhost:8787',
         changeOrigin: true,
         // '/api' 경로를 ''으로 다시 씀
         // rewrite: (path) => path.replace(/^\/api\/quote/, ''),

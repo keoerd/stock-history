@@ -1,7 +1,6 @@
 # wrangler.toml
 
 name = "stock-analysis-project"
-main = "src/worker.js" # Cron Trigger를 처리할 메인 워커 파일
 compatibility_date = "2023-10-30"
 
 # Cron Trigger 설정 (매시 45분에 실행)
@@ -11,7 +10,8 @@ compatibility_date = "2023-10-30"
 # [夏令時] 10:45 PM KST ~ 6:45 AM KST -> 13:45 ~ 21:45 UTC
 # [標準時] 11:45 PM KST ~ 7:45 AM KST -> 14:45 ~ 22:45 UTC
 # 두 경우를 모두 포함하도록 넓게 설정합니다.
-crons = ["45 13-23,0 * * 1-5"]
+# crons = ["45 13-23,0 * * 1-5"]
+crons = ["* * * * *"]
 
 # D1 데이터베이스 바인딩
 [[d1_databases]]
@@ -21,6 +21,6 @@ database_id = "9d3b6822-bded-47bd-ae0f-bf1b6baf229f" # `wrangler d1 create` 명�
 
 # KV 네임스페이스 바인딩
 [[kv_namespaces]]
-binding = "TICKER_KV"
-id = "your-kv-namespace-id" # `wrangler kv:namespace create` 명령어로 생성 후 채워넣으세요.
-preview_id = "your-kv-preview-id"
+binding = "MY_KV"
+id = "15058d15df294607903d2e879dbf292a" # `wrangler kv:namespace create` 명령어로 생성 후 채워넣으세요.
+preview_id = "15058d15df294607903d2e879dbf292a"
